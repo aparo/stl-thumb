@@ -232,7 +232,7 @@ pub fn render_to_window(config: Config) -> Result<(), Box<dyn Error>> {
                 &depthtexture,
             )
             .unwrap();
-            let mut target = display.draw();
+            let target = display.draw();
             target.blit_from_simple_framebuffer(
                 &framebuffer,
                 &glium::Rect {
