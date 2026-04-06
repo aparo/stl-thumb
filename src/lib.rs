@@ -20,7 +20,7 @@ use libc::c_char;
 use mesh::Mesh;
 use std::error::Error;
 use std::ffi::CStr;
-use std::{io, slice, thread};
+use std::{cell::RefCell, io, slice, thread};
 use winit::dpi::PhysicalSize;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
@@ -28,7 +28,6 @@ use winit::event_loop::EventLoop;
 #[cfg(target_os = "linux")]
 use std::env;
 
-// TODO: Move this stuff to config module
 const CAM_FOV_DEG: f32 = 30.0;
 const CAM_POSITION: cgmath::Point3<f32> = cgmath::Point3 {
     x: 2.0,
@@ -57,10 +56,38 @@ fn print_context_info(display: &impl Facade) {
     );
 }
 
-fn build_event_loop() -> EventLoop<()> {
+thread_local! {
+    static EVENT_LOOP: RefCell<Option<EventLoop<()>>> = RefCell::new(None);
+}
+
+fn create_event_loop_once() -> EventLoop<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use winit::platform::x11::EventLoopBuilderExtX11;
+        if let Ok(el) = EventLoop::builder().with_any_thread(true).build() {
+            return el;
+        }
+        use winit::platform::wayland::EventLoopBuilderExtWayland;
+        if let Ok(el) = EventLoop::builder().with_any_thread(true).build() {
+            return el;
+        }
+    }
     EventLoop::builder()
         .build()
         .expect("Failed to create event loop")
+}
+
+fn with_event_loop<F, R>(f: F) -> R
+where
+    F: FnOnce(&EventLoop<()>) -> R,
+{
+    EVENT_LOOP.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        if opt.is_none() {
+            *opt = Some(create_event_loop_once());
+        }
+        f(opt.as_ref().unwrap())
+    })
 }
 
 fn render_pipeline<F>(
@@ -73,9 +100,6 @@ fn render_pipeline<F>(
 where
     F: Facade,
 {
-    // Graphics Stuff
-    // ==============
-
     let params = glium::DrawParameters {
         depth: glium::Depth {
             test: glium::draw_parameters::DepthTest::IfLess,
@@ -86,13 +110,9 @@ where
         ..Default::default()
     };
 
-    // Load and compile shaders
-    // ------------------------
-
     let vertex_shader_src = include_str!("shaders/model.vert");
     let pixel_shader_src = include_str!("shaders/model.frag");
 
-    // TODO: Cache program binary
     let program = glium::Program::from_source(display, vertex_shader_src, pixel_shader_src, None);
     let program = match program {
         Ok(p) => p,
@@ -103,22 +123,11 @@ where
         Err(err) => panic!("{}", err),
     };
 
-    // Send mesh data to GPU
-    // ---------------------
-
     let vertex_buf = glium::VertexBuffer::new(display, &mesh.vertices).unwrap();
     let normal_buf = glium::VertexBuffer::new(display, &mesh.normals).unwrap();
-
-    // Can use NoIndices here because STLs are dumb
     let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
 
-    // Setup uniforms
-    // --------------
-
-    // Transformation matrix (positions, scales and rotates model)
     let transform_matrix = mesh.scale_and_center();
-
-    // View matrix (convert to positions relative to camera)
     let view_matrix = cgmath::Matrix4::look_at_rh(
         CAM_POSITION,
         cgmath::Point3::origin(),
@@ -128,7 +137,6 @@ where
     debug!("View:");
     print_matrix(view_matrix.into());
 
-    // Perspective matrix (give illusion of depth)
     let perspective_matrix = cgmath::perspective(
         cgmath::Deg(CAM_FOV_DEG),
         config.width as f32 / config.height as f32,
@@ -139,7 +147,6 @@ where
     debug!("Perspective:");
     print_matrix(perspective_matrix.into());
 
-    // Direction of light source
     let light_dir = [-1.1, 0.4, 1.0f32];
 
     let uniforms = uniform! {
@@ -151,17 +158,11 @@ where
         specular_color: config.material.specular,
     };
 
-    // Draw
-    // ----
-
-    // Create FXAA system
     let fxaa = fxaa::FxaaSystem::new(display);
     let fxaa_enable = matches!(config.aamethod, AAMethod::FXAA);
 
     fxaa::draw(&fxaa, framebuffer, fxaa_enable, |target| {
-        // Fills background color and clears depth buffer
         target.clear_color_and_depth(config.background, 1.0);
-
         target
             .draw(
                 (&vertex_buf, &normal_buf),
@@ -173,9 +174,6 @@ where
             .unwrap();
     });
 
-    // Convert Image
-    // =============
-
     let pixels: glium::texture::RawImage2d<u8> = texture.read();
     let img = image::ImageBuffer::from_raw(config.width, config.height, pixels.data.into_owned())
         .unwrap();
@@ -183,10 +181,12 @@ where
 }
 
 pub fn render_to_window(config: Config) -> Result<(), Box<dyn Error>> {
-    // Get geometry from model file
     let mesh = Mesh::load(&config.model_filename, config.recalc_normals)?;
 
-    let event_loop = build_event_loop();
+    let event_loop = EVENT_LOOP.with(|cell| {
+        cell.borrow_mut().take().unwrap_or_else(create_event_loop_once)
+    });
+
     let window_dim = PhysicalSize::new(config.width, config.height);
 
     let (window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
@@ -206,7 +206,6 @@ pub fn render_to_window(config: Config) -> Result<(), Box<dyn Error>> {
     let depthtexture =
         glium::texture::DepthTexture2d::empty(&display, config.width, config.height).unwrap();
 
-    // Pre-render the scene once into the offscreen texture
     {
         let mut framebuffer = glium::framebuffer::SimpleFrameBuffer::with_depth_buffer(
             &display,
@@ -261,42 +260,39 @@ pub fn render_to_window(config: Config) -> Result<(), Box<dyn Error>> {
 }
 
 pub fn render_to_image(config: &Config) -> Result<image::DynamicImage, Box<dyn Error>> {
-    // Get geometry from model file
     let mesh = Mesh::load(&config.model_filename, config.recalc_normals)?;
 
-    // Create GL context using a hidden window
-    let event_loop = build_event_loop();
-    let window_dim = PhysicalSize::new(config.width, config.height);
+    with_event_loop(|event_loop| -> Result<image::DynamicImage, Box<dyn Error>> {
+        let window_dim = PhysicalSize::new(config.width, config.height);
 
-    let (_window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
-        .set_window_builder(
-            winit::window::WindowAttributes::default()
-                .with_title("stl-thumb")
-                .with_inner_size(window_dim)
-                .with_visible(false),
+        let (_window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
+            .set_window_builder(
+                winit::window::WindowAttributes::default()
+                    .with_title("stl-thumb")
+                    .with_inner_size(window_dim)
+                    .with_visible(false),
+            )
+            .build(event_loop);
+
+        print_context_info(&display);
+
+        let texture = glium::Texture2d::empty(&display, config.width, config.height).unwrap();
+        let depthtexture =
+            glium::texture::DepthTexture2d::empty(&display, config.width, config.height).unwrap();
+        let mut framebuffer = glium::framebuffer::SimpleFrameBuffer::with_depth_buffer(
+            &display,
+            &texture,
+            &depthtexture,
         )
-        .build(&event_loop);
+        .unwrap();
 
-    print_context_info(&display);
-
-    let texture = glium::Texture2d::empty(&display, config.width, config.height).unwrap();
-    let depthtexture =
-        glium::texture::DepthTexture2d::empty(&display, config.width, config.height).unwrap();
-    let mut framebuffer = glium::framebuffer::SimpleFrameBuffer::with_depth_buffer(
-        &display,
-        &texture,
-        &depthtexture,
-    )
-    .unwrap();
-
-    Ok(render_pipeline(&display, config, &mesh, &mut framebuffer, &texture))
+        Ok(render_pipeline(&display, config, &mesh, &mut framebuffer, &texture))
+    })
 }
 
 pub fn render_to_file(config: &Config) -> Result<(), Box<dyn Error>> {
     let img = render_to_image(config)?;
 
-    // Choose output
-    // Write to stdout if user did not specify a file
     let mut output: Box<dyn io::Write> = match config.img_filename.as_str() {
         "-" => Box::new(io::stdout()),
         _ => Box::new(std::fs::File::create(&config.img_filename).unwrap()),
@@ -328,14 +324,6 @@ pub fn render_to_file(config: &Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Allows utilizing `stl-thumb` from C-like languages
-///
-/// Returns `true` if successful and `false` if unsuccessful.
-///
-/// # Safety
-///
-/// * `buf_ptr` _must_ point to a valid initialized buffer, at least `width * height * 4` bytes long.
-/// * `model_filename_c` must point to a valid null-terminated string.
 #[no_mangle]
 pub unsafe extern "C" fn render_to_buffer(
     buf_ptr: *mut u8,
@@ -343,11 +331,9 @@ pub unsafe extern "C" fn render_to_buffer(
     height: u32,
     model_filename_c: *const c_char,
 ) -> bool {
-    // Workaround for issues with OpenGL 3.1 on Mesa 18.3
     #[cfg(target_os = "linux")]
     env::set_var("MESA_GL_VERSION_OVERRIDE", "2.1");
 
-    // Check that the buffer pointer is valid
     if buf_ptr.is_null() {
         error!("Image buffer pointer is null");
         return false;
@@ -356,7 +342,6 @@ pub unsafe extern "C" fn render_to_buffer(
     let buf_size = (width * height * 4) as usize;
     let buf = unsafe { slice::from_raw_parts_mut(buf_ptr, buf_size) };
 
-    // Check validity of provided file path string
     let model_filename_cstr = unsafe {
         if model_filename_c.is_null() {
             error!("model file path pointer is null");
@@ -373,7 +358,6 @@ pub unsafe extern "C" fn render_to_buffer(
         }
     };
 
-    // Setup configuration for the renderer
     let config = Config {
         model_filename: model_filename_str.to_string(),
         width,
@@ -381,8 +365,6 @@ pub unsafe extern "C" fn render_to_buffer(
         ..Default::default()
     };
 
-    // Render
-    // Run renderer in separate thread so OpenGL problems do not crash caller
     let render_thread = thread::spawn(move || render_to_image(&config).unwrap());
     let img = match render_thread.join() {
         Ok(s) => s,
@@ -392,7 +374,6 @@ pub unsafe extern "C" fn render_to_buffer(
         }
     };
 
-    // Copy image to output buffer
     match img.as_rgba8() {
         Some(s) => buf.copy_from_slice(s),
         None => {
@@ -404,7 +385,6 @@ pub unsafe extern "C" fn render_to_buffer(
     true
 }
 
-// TODO: Move tests to their own file
 #[cfg(test)]
 mod tests {
     use super::*;
