@@ -29,7 +29,7 @@ cgmath = { version = "0.18.0", features = ["mint"] }
 clap = "4.5"
 image = "0.25"
 winit = "0.30"
-glium = "0.32"
+glium = "0.34"
 libc = "0.2"
 log = "0.4.17"
 mint = "0.5.9"
