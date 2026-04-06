@@ -26,13 +26,13 @@ jobs:
     - name: Install packages
       run: |
         sudo apt-get update
-        sudo apt-get install libosmesa6-dev
+        sudo apt-get install libosmesa6-dev xvfb
     - name: Build
       run: |
         cargo build --release --verbose
         strip -s target/release/stl-thumb
     - name: Run tests
-      run: RUST_BACKTRACE=1 cargo test --verbose
+      run: xvfb-run RUST_BACKTRACE=1 cargo test --verbose
 
   package-linux:
     needs: [build]
