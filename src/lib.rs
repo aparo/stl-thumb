@@ -67,6 +67,9 @@ fn create_event_loop_once() -> EventLoop<()> {
         if let Ok(el) = EventLoop::builder().with_any_thread(true).build() {
             return el;
         }
+    }
+    #[cfg(target_os = "linux")]
+    {
         use winit::platform::wayland::EventLoopBuilderExtWayland;
         if let Ok(el) = EventLoop::builder().with_any_thread(true).build() {
             return el;
