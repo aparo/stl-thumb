@@ -32,7 +32,7 @@ jobs:
         cargo build --release --verbose
         strip -s target/release/stl-thumb
     - name: Run tests
-      run: xvfb-run RUST_BACKTRACE=1 cargo test --verbose
+      run: RUST_BACKTRACE=1 xvfb-run cargo test --verbose
 
   package-linux:
     needs: [build]
