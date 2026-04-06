@@ -23,7 +23,7 @@ use std::ffi::CStr;
 use std::{io, slice, thread};
 use winit::dpi::PhysicalSize;
 use winit::event::{Event, WindowEvent};
-use winit::event_loop::{EventLoop, EventLoopBuilder};
+use winit::event_loop::EventLoop;
 
 #[cfg(target_os = "linux")]
 use std::env;
@@ -58,21 +58,9 @@ fn print_context_info(display: &impl Facade) {
 }
 
 fn build_event_loop() -> EventLoop<()> {
-    let mut builder = EventLoopBuilder::<()>::new();
-
-    #[cfg(target_os = "windows")]
-    {
-        use winit::platform::windows::EventLoopBuilderExtWindows;
-        builder.with_any_thread(true);
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        use winit::platform::unix::EventLoopBuilderExtUnix;
-        builder.with_any_thread(true);
-    }
-
-    builder.build()
+    EventLoop::builder()
+        .build()
+        .expect("Failed to create event loop")
 }
 
 fn render_pipeline<F>(
