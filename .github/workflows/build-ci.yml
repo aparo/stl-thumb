@@ -1,22 +1,19 @@
 name: Build
-
 on:
   push:
     branches: [ master ]
   pull_request:
     branches: [ master ]
   workflow_dispatch:
-
 env:
   CARGO_TERM_COLOR: always
-
 jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/cache@v3
+    - uses: actions/checkout@v4
+    - uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/bin/
@@ -36,16 +33,13 @@ jobs:
     - name: Run tests
       run: RUST_BACKTRACE=1 cargo test --verbose
 
-  package:
+  package-linux:
     needs: [build]
-    name: Package
+    name: Package Linux (amd64)
     runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        target: [x86_64-unknown-linux-gnu, armv7-unknown-linux-gnueabihf, aarch64-unknown-linux-gnu]
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/cache@v3
+    - uses: actions/checkout@v4
+    - uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/bin/
@@ -53,37 +47,46 @@ jobs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           target/
-        key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-x86_64-cargo-${{ hashFiles('**/Cargo.lock') }}
     - name: Install packages
-      # This is all BS to get random dependencies to cross compile and I hate it
       run: |
-        sudo cp .github/workflows/sources.list /etc/apt/sources.list
-        sudo dpkg --add-architecture arm64
-        sudo dpkg --add-architecture armhf
         sudo apt-get update
-        sudo apt-get install gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu g++-arm-linux-gnueabihf g++-aarch64-linux-gnu libc-dev-armhf-cross libc-dev-arm64-cross libfreetype6-dev:arm64 libfreetype6-dev:armhf libfontconfig-dev:arm64 libfontconfig-dev:armhf
-    - name: Prep build environment
+        sudo apt-get install libosmesa6-dev libfreetype6-dev libfontconfig-dev
+    - name: Install packaging tools
       run: |
-        if [ ${{ matrix.target }} == "armv7-unknown-linux-gnueabihf" ];
-        then
-          export PKG_CONFIG_SYSROOT_DIR=/usr/arm-linux-gnueabihf
-        elif [ ${{ matrix.target }} == "aarch64-unknown-linux-gnu" ];
-        then
-          export PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu
-        fi
-        rustup target add ${{ matrix.target }}
         cargo install cargo-deb --force
         cargo install cargo-generate-rpm --force
     - name: Package DEB
-      run: |
-        cargo deb --target ${{ matrix.target }}
+      run: cargo deb
     - name: Package RPM
       run: |
         cargo build --release
-        cargo generate-rpm --target-dir ./target --target ${{ matrix.target }}
+        cargo generate-rpm
     - uses: actions/upload-artifact@v4
       with:
-        name: deb-rpm-${{ matrix.target }}
+        name: linux-amd64-packages
         path: |
-          target/${{ matrix.target }}/debian/*.deb
-          target/${{ matrix.target }}/generate-rpm/*.rpm
+          target/debian/*.deb
+          target/generate-rpm/*.rpm
+
+  package-windows:
+    needs: [build]
+    name: Package Windows (x64)
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-windows-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - name: Build
+      run: cargo build --release --verbose
+    - uses: actions/upload-artifact@v4
+      with:
+        name: windows-x64
+        path: target/release/stl-thumb.exe
