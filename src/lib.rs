@@ -20,7 +20,7 @@ use libc::c_char;
 use mesh::Mesh;
 use std::error::Error;
 use std::ffi::CStr;
-use std::{io, slice, thread};
+use std::{cell::RefCell, io, slice, thread};
 use winit::dpi::PhysicalSize;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
@@ -56,10 +56,21 @@ fn print_context_info(display: &impl Facade) {
     );
 }
 
-fn build_event_loop() -> EventLoop<()> {
-    #[cfg(target_os = "windows")]
+thread_local! {
+    static EVENT_LOOP: RefCell<Option<EventLoop<()>>> = RefCell::new(None);
+}
+
+fn create_event_loop_once() -> EventLoop<()> {
+    #[cfg(target_os = "linux")]
     {
-        use winit::platform::windows::EventLoopBuilderExtWindows;
+        use winit::platform::x11::EventLoopBuilderExtX11;
+        if let Ok(el) = EventLoop::builder().with_any_thread(true).build() {
+            return el;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use winit::platform::wayland::EventLoopBuilderExtWayland;
         if let Ok(el) = EventLoop::builder().with_any_thread(true).build() {
             return el;
         }
@@ -67,6 +78,19 @@ fn build_event_loop() -> EventLoop<()> {
     EventLoop::builder()
         .build()
         .expect("Failed to create event loop")
+}
+
+fn with_event_loop<F, R>(f: F) -> R
+where
+    F: FnOnce(&EventLoop<()>) -> R,
+{
+    EVENT_LOOP.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        if opt.is_none() {
+            *opt = Some(create_event_loop_once());
+        }
+        f(opt.as_ref().unwrap())
+    })
 }
 
 fn render_pipeline<F>(
@@ -162,7 +186,10 @@ where
 pub fn render_to_window(config: Config) -> Result<(), Box<dyn Error>> {
     let mesh = Mesh::load(&config.model_filename, config.recalc_normals)?;
 
-    let event_loop = build_event_loop();
+    let event_loop = EVENT_LOOP.with(|cell| {
+        cell.borrow_mut().take().unwrap_or_else(create_event_loop_once)
+    });
+
     let window_dim = PhysicalSize::new(config.width, config.height);
 
     let (window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
@@ -238,25 +265,32 @@ pub fn render_to_window(config: Config) -> Result<(), Box<dyn Error>> {
 pub fn render_to_image(config: &Config) -> Result<image::DynamicImage, Box<dyn Error>> {
     let mesh = Mesh::load(&config.model_filename, config.recalc_normals)?;
 
-    let size = glium::glutin::dpi::PhysicalSize::new(config.width, config.height);
-    let context = glium::glutin::ContextBuilder::new()
-        .build_osmesa(size)?;
-    let context = unsafe { context.treat_as_current() };
-    let display = glium::backend::glutin::headless::Headless::new(context)?;
+    with_event_loop(|event_loop| -> Result<image::DynamicImage, Box<dyn Error>> {
+        let window_dim = PhysicalSize::new(config.width, config.height);
 
-    print_context_info(&display);
+        let (_window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
+            .set_window_builder(
+                winit::window::WindowAttributes::default()
+                    .with_title("stl-thumb")
+                    .with_inner_size(window_dim)
+                    .with_visible(false),
+            )
+            .build(event_loop);
 
-    let texture = glium::Texture2d::empty(&display, config.width, config.height).unwrap();
-    let depthtexture =
-        glium::texture::DepthTexture2d::empty(&display, config.width, config.height).unwrap();
-    let mut framebuffer = glium::framebuffer::SimpleFrameBuffer::with_depth_buffer(
-        &display,
-        &texture,
-        &depthtexture,
-    )
-    .unwrap();
+        print_context_info(&display);
 
-    Ok(render_pipeline(&display, config, &mesh, &mut framebuffer, &texture))
+        let texture = glium::Texture2d::empty(&display, config.width, config.height).unwrap();
+        let depthtexture =
+            glium::texture::DepthTexture2d::empty(&display, config.width, config.height).unwrap();
+        let mut framebuffer = glium::framebuffer::SimpleFrameBuffer::with_depth_buffer(
+            &display,
+            &texture,
+            &depthtexture,
+        )
+        .unwrap();
+
+        Ok(render_pipeline(&display, config, &mesh, &mut framebuffer, &texture))
+    })
 }
 
 pub fn render_to_file(config: &Config) -> Result<(), Box<dyn Error>> {
