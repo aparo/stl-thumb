@@ -26,14 +26,13 @@ jobs:
     - name: Install packages
       run: |
         sudo apt-get update
-        sudo apt-get install libosmesa6-dev xvfb
+        sudo apt-get install libosmesa6-dev xvfb libxkbcommon-dev libxkbcommon-x11-dev libxkbcommon-x11-0
     - name: Build
       run: |
         cargo build --release --verbose
         strip -s target/release/stl-thumb
     - name: Run tests
       run: RUST_BACKTRACE=1 xvfb-run cargo test --verbose -- --test-threads=1
-
   package-linux:
     needs: [build]
     name: Package Linux (amd64)
@@ -52,7 +51,7 @@ jobs:
     - name: Install packages
       run: |
         sudo apt-get update
-        sudo apt-get install libosmesa6-dev xvfb libxkbcommon-dev libxkbcommon-x11-dev
+        sudo apt-get install libosmesa6-dev xvfb libxkbcommon-dev libxkbcommon-x11-dev libxkbcommon-x11-0
     - name: Install packaging tools
       run: |
         cargo install cargo-deb --force
@@ -69,7 +68,6 @@ jobs:
         path: |
           target/debian/*.deb
           target/generate-rpm/*.rpm
-
   package-windows:
     needs: [build]
     name: Package Windows (x64)
