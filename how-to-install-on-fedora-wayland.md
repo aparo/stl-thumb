@@ -42,7 +42,7 @@ sudo cp target/release/stl-thumb /usr/bin/stl-thumb
 sudo chmod 755 /usr/bin/stl-thumb
 ```
 
-**Important:** Install to `/usr/bin/`, not `/usr/local/bin/`. GNOME's bubblewrap sandbox only mounts `/usr`, so binaries in `/usr/local/bin/` are invisible to the thumbnailer.
+**Important:** Install to `/usr/bin/`, not `/usr/local/bin/`. GNOME's bubblewrap sandbox mounts `/usr` read-only, and `/usr/local/bin` takes precedence in PATH. If an older binary exists in `/usr/local/bin`, the sandbox will use it instead of `/usr/bin`. Either install to `/usr/bin/` only, or make sure both locations have the same version.
 
 ## 3. Install thumbnailer configs
 
@@ -123,13 +123,13 @@ The OSMesa approach in this guide does not trigger SELinux denials.
 
 ### Specific files not thumbnailing
 
-Some 3MF files use XML structures or extensions that `stl-thumb`'s parser does not support. Test a specific file to confirm:
+Some 3MF files may fail to render. Test a specific file to confirm:
 
 ```bash
 stl-thumb -f png -s 256 yourfile.3mf /tmp/test.png
 ```
 
-If this outputs `Deserialization error from xml reading`, the file format is not supported by the current `threemf` crate.
+If this errors, the file may use 3MF features that are not yet supported.
 
 ### Verifying the sandbox works
 
