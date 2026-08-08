@@ -24,30 +24,30 @@ path = "src/main.rs"
 [dependencies]
 ahash = "0.8.11"
 cgmath = { version = "0.18.0", features = ["mint"] }
-clap = "4.5"
+clap = "4.6.6"
 image = "0.25"
 winit = "0.30"
-glium = "0.35"
-libc = "0.2"
-log = "0.4.17"
+wgpu = "30.0.0"
+bytemuck = { version = "1.25.2", features = ["derive"] }
+pollster = "1.0.1"
+libc = "0.2.189"
+log = "0.4.33"
 mint = "0.5.9"
 stderrlog = "0.6.0"
-stl_io = "0.8.0"
-tobj = "4.0.2"
-threemf = "0.6.0"
-winit = "0.30.3"
+stl_io = "0.11.0"
+tobj = "4.0.5"
 threemf = "0.8.0"
-quick-xml = "0.39"
-zip = "8"
+quick-xml = "0.41.0"
+zip = "8.6.0"
 
 #[patch.crates-io]
 #glutin = { git = "https://github.com/rust-windowing/glutin.git", rev = "07c461e" }
 
 [build-dependencies]
-cbindgen = "0.28"
+cbindgen = "0.29.4"
 
 [dev-dependencies]
-criterion = "0.5.1"
+criterion = "0.8.2"
 
 [[bench]]
 name = "cube"

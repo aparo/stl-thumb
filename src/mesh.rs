@@ -3,6 +3,7 @@ extern crate cgmath;
 extern crate stl_io;
 extern crate tobj;
 
+use bytemuck::{Pod, Zeroable};
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
@@ -17,21 +18,17 @@ use self::stl_io::{Triangle, Vector};
 use self::ahash::AHashMap;
 use self::tobj::LoadOptions;
 
-#[derive(Copy, Clone)]
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
 pub struct Vertex {
-    position: [f32; 3],
-    //texcoords: [f32; 2],
+    pub position: [f32; 3],
 }
 
-implement_vertex!(Vertex, position);
-//implement_vertex!(Vertex, position, texcoords);
-
-#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct Normal {
-    normal: [f32; 3],
+    pub normal: [f32; 3],
 }
-
-implement_vertex!(Normal, normal);
 
 #[derive(Clone)]
 pub struct BoundingBox {
