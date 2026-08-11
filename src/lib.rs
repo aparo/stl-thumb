@@ -7,6 +7,7 @@ extern crate mint;
 
 pub mod config;
 mod fxaa;
+pub mod info;
 mod mesh;
 
 use bytemuck::{Pod, Zeroable};

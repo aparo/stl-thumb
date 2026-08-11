@@ -84,15 +84,17 @@ $ cargo generate-rpm
 ## Command Line Usage
 
 ```
-$ stl-thumb <MODEL_FILE> [IMG_FILE]
+$ stl-thumb <MODEL_FILE> [IMG_FILE] [OPTIONS]
 ```
+
+`IMG_FILE` is optional when `--info` is used alone.
 
 ### Options
 
 | Option | Description |
 | --- | --- |
 | \<MODEL_FILE\> | The model file you want a picture of. Use `-` to read from stdin instead of a file. |
-| \<IMG_FILE\> | The thumbnail image file that will be created. Use `-` to write to stdout instead of a file. |
+| \<IMG_FILE\> | The thumbnail image file that will be created. Use `-` to write to stdout instead of a file. Optional when `--info` is the only goal. |
 | -s, --size \<size\> | Specify the width of the image in pixels. The image is always square. |
 | -f, --format \<format\> | The format of the image file. If not specified it will be determined from the file extension, or default to PNG if there is no extension. Supported formats: PNG, JPEG, GIF, ICO, BMP |
 | -m, --material \<ambient\> \<diffuse\> \<specular\> | Colors for rendering the mesh using the Phong reflection model. Requires 3 colors as rgb hex values: ambient, diffuse, and specular. Defaults to blue. |
@@ -101,10 +103,42 @@ $ stl-thumb <MODEL_FILE> [IMG_FILE]
 | --recalc-normals | Force recalculation of face normals. Use when dealing with malformed STL files. |
 | -w, --multi-view | Generate a 2×2 grid with four standard views: isometric, front, top, and side. The default output size is twice the normal default so each tile retains full resolution. |
 | -l, --label | Draw a view-name label (Isometric, Front, Top, Side) at the top of each panel in the multi-view grid. Requires `--multi-view`. |
+| -i, --info | Print model KPIs to stdout (see below). `IMG_FILE` is optional when this flag is used alone. |
 | -x | Display the image in a window instead of saving a file. |
 | -h, --help | Prints help information. |
 | -V, --version | Prints version information. |
 | -v[v][v] | Increase message verbosity. Levels: Errors, Warnings, Info, Debugging |
+
+### Model info example
+
+The `-i` / `--info` flag prints key metrics extracted from the model file — no GPU or rendering required:
+
+```
+$ stl-thumb model.stl --info
+File:          model.stl
+Format:        STL
+File size:     10.76 MB (11,285,384 bytes)
+Triangles:     225,706
+Vertices:      677,118
+Dimensions:    60.0010 x 31.0040 x 48.0000  (X × Y × Z)
+Surface area:  9430.9824
+Volume:        15550.5312  (estimate — mesh is not watertight)
+Watertight:    no
+```
+
+| KPI | Method |
+| --- | --- |
+| Triangles / Vertices | Counted from parsed geometry |
+| Dimensions | Bounding box extents (model units — typically mm for 3D-print formats) |
+| Surface area | Sum of ½ ‖(b−a) × (c−a)‖ over all triangles |
+| Volume | Divergence theorem: \|Σ a·(b×c)\| / 6 (valid only for watertight meshes) |
+| Watertight | Every mesh edge is shared by exactly two triangles |
+
+`--info` can be combined with a render: the KPIs are printed first, then the thumbnail is generated normally.
+
+```
+$ stl-thumb model.stl thumb.png --info --multi-view --label
+```
 
 ### Multi-view example
 
@@ -130,6 +164,7 @@ A 2-pixel separator line is always drawn between panels. Adding `-l` overlays th
 - Migrated GPU backend from glium/OpenGL to [wgpu](https://wgpu.rs/) 30.0 with WGSL shaders
 - Added `--multi-view` (`-w`) flag: renders a 2×2 grid of isometric, front, top, and side views
 - Added `--label` (`-l`) flag: overlays view-name labels on each panel of the multi-view grid
+- Added `--info` (`-i`) flag: prints model KPIs (triangle count, dimensions, surface area, volume, watertight check) without requiring GPU rendering
 - Updated winit, clap, image, and other dependencies to current versions
 - Modernized GitHub Actions CI workflow with Node.js 24
 - Removed deprecated Travis CI and AppVeyor configuration

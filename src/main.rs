@@ -6,29 +6,44 @@ extern crate stl_thumb;
 
 use std::process;
 use stl_thumb::config::Config;
+use stl_thumb::info::ModelInfo;
 
 fn main() {
     let config = Config::new();
 
     stderrlog::new()
         .module(module_path!())
-        //.quiet(config.quiet)
         .verbosity(config.verbosity)
-        //.timestamp(config.timestamp)
         .init()
         .unwrap();
 
     info!("MODEL File: {}", config.model_filename);
     info!("IMG File: {}", config.img_filename);
 
+    if config.info {
+        match ModelInfo::from_file(&config.model_filename, config.recalc_normals) {
+            Ok(kpi) => print!("{}", kpi),
+            Err(e) => {
+                error!("Failed to extract model info: {}", e);
+                process::exit(1);
+            }
+        }
+        // If no IMG_FILE was given, info-only mode — exit here.
+        if config.img_filename.is_empty() {
+            return;
+        }
+    }
+
     if config.visible {
         if let Err(e) = stl_thumb::render_to_window(config) {
             error!("Application error: {}", e);
             process::exit(1);
         }
-    } else if let Err(e) = stl_thumb::render_to_file(&config) {
-        error!("Application error: {}", e);
-        process::exit(1);
+    } else if !config.img_filename.is_empty() {
+        if let Err(e) = stl_thumb::render_to_file(&config) {
+            error!("Application error: {}", e);
+            process::exit(1);
+        }
     }
 }
 

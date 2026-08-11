@@ -30,6 +30,7 @@ pub struct Config {
     pub recalc_normals: bool,
     pub multi_view: bool,
     pub label: bool,
+    pub info: bool,
 }
 
 impl Default for Config {
@@ -52,6 +53,7 @@ impl Default for Config {
             recalc_normals: false,
             multi_view: false,
             label: false,
+            info: false,
         }
     }
 }
@@ -71,7 +73,7 @@ impl Config {
             .arg(
                 clap::Arg::new("IMG_FILE")
                     .help("Thumbnail image file. Use - to write to stdout instead of a file.")
-                    .required(true)
+                    .required_unless_present("info")
                     .index(2),
             )
             .arg(
@@ -142,6 +144,13 @@ impl Config {
                     .long("label")
                     .action(clap::ArgAction::SetTrue)
             )
+            .arg(
+                clap::Arg::new("info")
+                    .help("Print model KPIs (triangle count, dimensions, surface area, volume, …) to stdout. IMG_FILE is optional when this flag is set.")
+                    .short('i')
+                    .long("info")
+                    .action(clap::ArgAction::SetTrue)
+            )
             .get_matches();
 
         let mut c = Config {
@@ -153,7 +162,7 @@ impl Config {
             .expect("MODEL_FILE not provided");
         c.img_filename = matches
             .remove_one::<String>("IMG_FILE")
-            .expect("IMG_FILE not provided");
+            .unwrap_or_default();
         match matches.get_one::<String>("format") {
             Some(x) => c.format = match_format(x),
             None => {
@@ -194,6 +203,7 @@ impl Config {
         c.recalc_normals = matches.contains_id("recalc_normals");
         c.multi_view = matches.get_flag("multi_view");
         c.label = matches.get_flag("label");
+        c.info = matches.get_flag("info");
 
         // When multi-view is active and no explicit size was given, double the default dimensions
         // so each tile retains the original default resolution.
