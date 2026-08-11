@@ -179,17 +179,20 @@ fn build_model_pipeline(
     (pipeline, bind_group_layout)
 }
 
-fn build_model_uniforms(config: &Config, mesh: &Mesh) -> ModelUniforms {
+fn build_model_uniforms_for_camera(
+    config: &Config,
+    mesh: &Mesh,
+    cam_pos: cgmath::Point3<f32>,
+    cam_up: cgmath::Vector3<f32>,
+    tile_w: u32,
+    tile_h: u32,
+) -> ModelUniforms {
     let transform_matrix = mesh.scale_and_center();
-    let view_matrix = cgmath::Matrix4::look_at_rh(
-        CAM_POSITION,
-        cgmath::Point3::origin(),
-        cgmath::Vector3::unit_z(),
-    );
+    let view_matrix = cgmath::Matrix4::look_at_rh(cam_pos, cgmath::Point3::origin(), cam_up);
     let perspective_matrix = OPENGL_TO_WGPU
         * cgmath::perspective(
             cgmath::Deg(CAM_FOV_DEG),
-            config.width as f32 / config.height as f32,
+            tile_w as f32 / tile_h as f32,
             0.1,
             1024.0,
         );
@@ -205,6 +208,17 @@ fn build_model_uniforms(config: &Config, mesh: &Mesh) -> ModelUniforms {
         specular_color: config.material.specular,
         _pad3:          0.0,
     }
+}
+
+fn build_model_uniforms(config: &Config, mesh: &Mesh) -> ModelUniforms {
+    build_model_uniforms_for_camera(
+        config,
+        mesh,
+        CAM_POSITION,
+        cgmath::Vector3::unit_z(),
+        config.width,
+        config.height,
+    )
 }
 
 fn model_render_pass(
@@ -273,6 +287,169 @@ fn create_headless_device() -> (wgpu::Device, wgpu::Queue) {
         trace: wgpu::Trace::Off,
     }))
     .expect("Failed to create wgpu device")
+}
+
+/// Draw 2-pixel gray separator lines at the tile boundaries of a 2×2 grid.
+fn draw_separator_lines(img: &mut image::RgbaImage, tile_w: u32, tile_h: u32) {
+    let color = image::Rgba([180u8, 180, 180, 255]);
+    for dx in 0..2u32 {
+        let x = tile_w + dx;
+        if x < img.width() {
+            for y in 0..img.height() {
+                img.put_pixel(x, y, color);
+            }
+        }
+    }
+    for dy in 0..2u32 {
+        let y = tile_h + dy;
+        if y < img.height() {
+            for x in 0..img.width() {
+                img.put_pixel(x, y, color);
+            }
+        }
+    }
+}
+
+/// Draw a centered view-name label at the top of a grid tile using an 8×8 bitmap
+/// font scaled 2× so it reads comfortably at typical thumbnail resolutions.
+fn draw_tile_label(img: &mut image::RgbaImage, text: &str, tile_x: u32, tile_y: u32, tile_w: u32) {
+    use font8x8::UnicodeFonts;
+
+    const SCALE: u32 = 2;
+    const CHAR_W: u32 = 8 * SCALE;
+    const CHAR_H: u32 = 8 * SCALE;
+    const PAD: u32 = 3;
+    let bar_h = CHAR_H + PAD * 2;
+
+    // Darken the strip behind the text to ensure contrast on any background.
+    for py in tile_y..tile_y + bar_h {
+        for px in tile_x..tile_x + tile_w {
+            if px < img.width() && py < img.height() {
+                let p = img.get_pixel_mut(px, py);
+                p[0] = (p[0] as u32 * 35 / 100) as u8;
+                p[1] = (p[1] as u32 * 35 / 100) as u8;
+                p[2] = (p[2] as u32 * 35 / 100) as u8;
+                // Ensure the bar is visible even on a fully-transparent background.
+                p[3] = p[3].max(200);
+            }
+        }
+    }
+
+    // Center the text block horizontally inside the tile.
+    let text_chars = text.chars().count() as u32;
+    let text_px_w = text_chars * CHAR_W;
+    let text_x = tile_x + tile_w.saturating_sub(text_px_w) / 2;
+    let text_y = tile_y + PAD;
+    let white = image::Rgba([255u8, 255, 255, 255]);
+
+    for (i, ch) in text.chars().enumerate() {
+        if let Some(glyph) = font8x8::BASIC_FONTS.get(ch) {
+            for (row, &bits) in glyph.iter().enumerate() {
+                for col in 0u32..8 {
+                    if bits & (1u8 << col) != 0 {
+                        for sy in 0..SCALE {
+                            for sx in 0..SCALE {
+                                let px = text_x + i as u32 * CHAR_W + col * SCALE + sx;
+                                let py = text_y + row as u32 * SCALE + sy;
+                                if px < img.width() && py < img.height() {
+                                    img.put_pixel(px, py, white);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a single view into raw RGBA pixels using the given camera uniforms.
+fn render_tile(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &wgpu::RenderPipeline,
+    model_bgl: &wgpu::BindGroupLayout,
+    vertex_buf: &wgpu::Buffer,
+    normal_buf: &wgpu::Buffer,
+    fxaa: &fxaa::FxaaSystem,
+    uniforms: &ModelUniforms,
+    tile_w: u32,
+    tile_h: u32,
+    background: (f32, f32, f32, f32),
+    fxaa_enable: bool,
+    vertex_count: u32,
+) -> Result<Vec<u8>, Box<dyn Error>> {
+    let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: None,
+        contents: bytemuck::bytes_of(uniforms),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: model_bgl,
+        entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform_buf.as_entire_binding() }],
+    });
+
+    let extent = wgpu::Extent3d { width: tile_w, height: tile_h, depth_or_array_layers: 1 };
+    let output_tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let output_view = output_tex.create_view(&Default::default());
+    let depth_tex = create_depth_texture(device, tile_w, tile_h);
+    let depth_view = depth_tex.create_view(&Default::default());
+
+    fxaa.draw(device, queue, &output_view, tile_w, tile_h, fxaa_enable, |intermediate, encoder| {
+        model_render_pass(encoder, pipeline, &bind_group, vertex_buf, normal_buf, intermediate, &depth_view, background, vertex_count);
+    });
+
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let unpadded_row = tile_w * 4;
+    let padded_row = ((unpadded_row + align - 1) / align) * align;
+
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (padded_row * tile_h) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    encoder.copy_texture_to_buffer(
+        output_tex.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &staging,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_row),
+                rows_per_image: None,
+            },
+        },
+        extent,
+    );
+    queue.submit(Some(encoder.finish()));
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    staging.slice(..).map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    rx.recv()??;
+
+    let mapped = staging.slice(..).get_mapped_range().unwrap();
+    let mut pixels: Vec<u8> = Vec::with_capacity((tile_w * tile_h * 4) as usize);
+    for row in 0..tile_h as usize {
+        let start = row * padded_row as usize;
+        pixels.extend_from_slice(&mapped[start..start + unpadded_row as usize]);
+    }
+    drop(mapped);
+    staging.unmap();
+
+    Ok(pixels)
 }
 
 pub fn render_to_window(config: Config) -> Result<(), Box<dyn Error>> {
@@ -424,15 +601,8 @@ pub fn render_to_window(config: Config) -> Result<(), Box<dyn Error>> {
 
 pub fn render_to_image(config: &Config) -> Result<image::DynamicImage, Box<dyn Error>> {
     let mesh = Mesh::load(&config.model_filename, config.recalc_normals)?;
-
     let (device, queue) = create_headless_device();
 
-    let uniforms = build_model_uniforms(config, &mesh);
-    let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::bytes_of(&uniforms),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
     let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
         contents: bytemuck::cast_slice(&mesh.vertices),
@@ -446,111 +616,60 @@ pub fn render_to_image(config: &Config) -> Result<image::DynamicImage, Box<dyn E
 
     let (model_pipeline, model_bgl) =
         build_model_pipeline(&device, wgpu::TextureFormat::Rgba8Unorm);
-    let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &model_bgl,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: uniform_buf.as_entire_binding(),
-        }],
-    });
-
-    let extent = wgpu::Extent3d {
-        width: config.width,
-        height: config.height,
-        depth_or_array_layers: 1,
-    };
-
-    let output_tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: None,
-        size: extent,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let output_view = output_tex.create_view(&Default::default());
-
-    let depth_tex = create_depth_texture(&device, config.width, config.height);
-    let depth_view = depth_tex.create_view(&Default::default());
-
+    let fxaa = fxaa::FxaaSystem::new(&device, wgpu::TextureFormat::Rgba8Unorm);
     let fxaa_enable = matches!(config.aamethod, AAMethod::FXAA);
     let vertex_count = mesh.vertices.len() as u32;
     let bg = config.background;
 
-    let fxaa = fxaa::FxaaSystem::new(&device, wgpu::TextureFormat::Rgba8Unorm);
-    fxaa.draw(
-        &device,
-        &queue,
-        &output_view,
-        config.width,
-        config.height,
-        fxaa_enable,
-        |intermediate_view, encoder| {
-            model_render_pass(
-                encoder,
-                &model_pipeline,
-                &model_bind_group,
-                &vertex_buf,
-                &normal_buf,
-                intermediate_view,
-                &depth_view,
-                bg,
-                vertex_count,
-            );
-        },
-    );
+    if config.multi_view {
+        // 2×2 grid: isometric (top-left) | front (top-right)
+        //             top     (bot-left)  | side  (bot-right)
+        let tile_w = config.width / 2;
+        let tile_h = config.height / 2;
 
-    // Read back pixels from GPU via a staging buffer.
-    // wgpu requires row stride to be a multiple of COPY_BYTES_PER_ROW_ALIGNMENT (256).
-    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let unpadded_row = config.width * 4;
-    let padded_row = ((unpadded_row + align - 1) / align) * align;
+        type Cam = (cgmath::Point3<f32>, cgmath::Vector3<f32>);
+        let views: [Cam; 4] = [
+            // isometric — same as default single-view camera
+            (cgmath::Point3::new(2.0, -4.0, 2.0), cgmath::Vector3::unit_z()),
+            // front — looking along -Y toward origin, Z up
+            (cgmath::Point3::new(0.0, -5.0, 0.0), cgmath::Vector3::unit_z()),
+            // top — looking down from +Z, Y up in image
+            (cgmath::Point3::new(0.0, 0.0, 5.0), cgmath::Vector3::new(0.0, 1.0, 0.0)),
+            // side — looking from +X, Z up
+            (cgmath::Point3::new(5.0, 0.0, 0.0), cgmath::Vector3::unit_z()),
+        ];
 
-    let staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: (padded_row * config.height) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+        let mut tiles: Vec<image::RgbaImage> = Vec::with_capacity(4);
+        for (cam_pos, cam_up) in &views {
+            let uniforms = build_model_uniforms_for_camera(config, &mesh, *cam_pos, *cam_up, tile_w, tile_h);
+            let pixels = render_tile(&device, &queue, &model_pipeline, &model_bgl, &vertex_buf, &normal_buf, &fxaa, &uniforms, tile_w, tile_h, bg, fxaa_enable, vertex_count)?;
+            tiles.push(image::ImageBuffer::from_raw(tile_w, tile_h, pixels).unwrap());
+        }
 
-    let mut encoder =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    encoder.copy_texture_to_buffer(
-        output_tex.as_image_copy(),
-        wgpu::TexelCopyBufferInfo {
-            buffer: &staging,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded_row),
-                rows_per_image: None,
-            },
-        },
-        extent,
-    );
-    queue.submit(Some(encoder.finish()));
+        let offsets: [(u32, u32); 4] = [(0, 0), (tile_w, 0), (0, tile_h), (tile_w, tile_h)];
+        let labels = ["Isometric", "Front", "Top", "Side"];
 
-    let (tx, rx) = std::sync::mpsc::channel();
-    staging
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
-    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-    rx.recv()??;
+        let mut grid: image::RgbaImage = image::ImageBuffer::new(config.width, config.height);
+        for (tile, &(ox, oy)) in tiles.iter().zip(offsets.iter()) {
+            image::imageops::replace(&mut grid, tile, ox as i64, oy as i64);
+        }
 
-    let mapped = staging.slice(..).get_mapped_range().unwrap();
-    let mut pixels: Vec<u8> = Vec::with_capacity((config.width * config.height * 4) as usize);
-    for row in 0..config.height as usize {
-        let start = row * padded_row as usize;
-        pixels.extend_from_slice(&mapped[start..start + unpadded_row as usize]);
+        // Grid separator lines are always drawn in multi-view mode.
+        draw_separator_lines(&mut grid, tile_w, tile_h);
+
+        if config.label {
+            for (&(ox, oy), label) in offsets.iter().zip(labels.iter()) {
+                draw_tile_label(&mut grid, label, ox, oy, tile_w);
+            }
+        }
+
+        Ok(image::DynamicImage::ImageRgba8(grid))
+    } else {
+        let uniforms = build_model_uniforms(config, &mesh);
+        let pixels = render_tile(&device, &queue, &model_pipeline, &model_bgl, &vertex_buf, &normal_buf, &fxaa, &uniforms, config.width, config.height, bg, fxaa_enable, vertex_count)?;
+        let img = image::ImageBuffer::from_raw(config.width, config.height, pixels).unwrap();
+        Ok(image::DynamicImage::ImageRgba8(img))
     }
-    drop(mapped);
-    staging.unmap();
-
-    // wgpu textures are stored top-down, same as image conventions — no flipv needed.
-    let img = image::ImageBuffer::from_raw(config.width, config.height, pixels).unwrap();
-    Ok(image::DynamicImage::ImageRgba8(img))
 }
 
 pub fn render_to_file(config: &Config) -> Result<(), Box<dyn Error>> {

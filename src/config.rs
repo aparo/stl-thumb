@@ -28,6 +28,8 @@ pub struct Config {
     pub background: (f32, f32, f32, f32),
     pub aamethod: AAMethod,
     pub recalc_normals: bool,
+    pub multi_view: bool,
+    pub label: bool,
 }
 
 impl Default for Config {
@@ -48,6 +50,8 @@ impl Default for Config {
             background: (0.0, 0.0, 0.0, 0.0),
             aamethod: AAMethod::FXAA,
             recalc_normals: false,
+            multi_view: false,
+            label: false,
         }
     }
 }
@@ -124,6 +128,20 @@ impl Config {
                     .help("Force recalculation of face normals. Use when dealing with malformed STL files.")
                     .long("recalc-normals")
             )
+            .arg(
+                clap::Arg::new("multi_view")
+                    .help("Generate a 2×2 grid with isometric, front, top, and side views. Default output size is twice the normal default.")
+                    .short('w')
+                    .long("multi-view")
+                    .action(clap::ArgAction::SetTrue)
+            )
+            .arg(
+                clap::Arg::new("label")
+                    .help("Draw a view-name label on each panel of the multi-view grid.")
+                    .short('l')
+                    .long("label")
+                    .action(clap::ArgAction::SetTrue)
+            )
             .get_matches();
 
         let mut c = Config {
@@ -174,6 +192,15 @@ impl Config {
             }
         }
         c.recalc_normals = matches.contains_id("recalc_normals");
+        c.multi_view = matches.get_flag("multi_view");
+        c.label = matches.get_flag("label");
+
+        // When multi-view is active and no explicit size was given, double the default dimensions
+        // so each tile retains the original default resolution.
+        if c.multi_view && matches.get_one::<String>("size").is_none() {
+            c.width *= 2;
+            c.height *= 2;
+        }
 
         c
     }

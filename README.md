@@ -4,7 +4,7 @@
 [![Documentation](https://img.shields.io/docsrs/stl-thumb/latest)](https://docs.rs/stl-thumb/latest/stl_thumb/)
 [![Crates.io](https://img.shields.io/crates/v/stl-thumb.svg)](https://crates.io/crates/stl-thumb)
 
-Stl-thumb is a fast lightweight thumbnail generator for 3D model (STL, OBJ, 3MF) files. It can show previews for model files in your file manager on Linux and Windows. It is written in Rust and uses OpenGL.
+Stl-thumb is a fast lightweight thumbnail generator for 3D model (STL, OBJ, 3MF) files. It can show previews for model files in your file manager on Linux and Windows. It is written in Rust and uses [wgpu](https://wgpu.rs/) for cross-platform GPU rendering.
 
 ![Screenshot](https://user-images.githubusercontent.com/3131268/116009182-f3f89c80-a5cc-11eb-817d-91e8a9fad279.png)
 
@@ -60,7 +60,6 @@ $ sudo zypper install stl-thumb
 
 - Rust (stable)
 - `libfontconfig-dev` (Linux)
-- `libosmesa6-dev` (Linux, for headless rendering)
 
 ### Building the tool itself:
 
@@ -92,26 +91,46 @@ $ stl-thumb <MODEL_FILE> [IMG_FILE]
 
 | Option | Description |
 | --- | --- |
-| \<MODEL_FILE\> | The model file you want a picture of. Use - to read from stdin instead of a file. |
-| \<IMG_FILE\> | The thumbnail image file that will be created. Use - to write to stdout instead of a file. |
-| -s, --size \<size\> | Specify width of the image. It will always be a square. |
+| \<MODEL_FILE\> | The model file you want a picture of. Use `-` to read from stdin instead of a file. |
+| \<IMG_FILE\> | The thumbnail image file that will be created. Use `-` to write to stdout instead of a file. |
+| -s, --size \<size\> | Specify the width of the image in pixels. The image is always square. |
 | -f, --format \<format\> | The format of the image file. If not specified it will be determined from the file extension, or default to PNG if there is no extension. Supported formats: PNG, JPEG, GIF, ICO, BMP |
 | -m, --material \<ambient\> \<diffuse\> \<specular\> | Colors for rendering the mesh using the Phong reflection model. Requires 3 colors as rgb hex values: ambient, diffuse, and specular. Defaults to blue. |
-| -b, --background \<color\> | The background color with transparency (rgba). Default is ffffff00. |
+| -b, --background \<color\> | The background color with transparency (rgba). Default is `ffffff00` (transparent). |
 | -a, --antialiasing [none, fxaa] | Anti-aliasing method. Default is FXAA, which is fast but may introduce artifacts. |
 | --recalc-normals | Force recalculation of face normals. Use when dealing with malformed STL files. |
+| -w, --multi-view | Generate a 2×2 grid with four standard views: isometric, front, top, and side. The default output size is twice the normal default so each tile retains full resolution. |
+| -l, --label | Draw a view-name label (Isometric, Front, Top, Side) at the top of each panel in the multi-view grid. Requires `--multi-view`. |
 | -x | Display the image in a window instead of saving a file. |
 | -h, --help | Prints help information. |
 | -V, --version | Prints version information. |
 | -v[v][v] | Increase message verbosity. Levels: Errors, Warnings, Info, Debugging |
 
+### Multi-view example
+
+```
+$ stl-thumb model.stl thumb.png --multi-view --label
+$ stl-thumb model.stl thumb.png -w -l -s 1024
+```
+
+The `-w` flag renders four camera angles and stitches them into a single image:
+
+```
+┌─────────────┬─────────────┐
+│  Isometric  │    Front    │
+├─────────────┼─────────────┤
+│     Top     │    Side     │
+└─────────────┴─────────────┘
+```
+
+A 2-pixel separator line is always drawn between panels. Adding `-l` overlays the view name at the top of each panel.
+
 ## Changes from upstream
 
-- Updated glium from 0.32 to 0.35
+- Migrated GPU backend from glium/OpenGL to [wgpu](https://wgpu.rs/) 30.0 with WGSL shaders
+- Added `--multi-view` (`-w`) flag: renders a 2×2 grid of isometric, front, top, and side views
+- Added `--label` (`-l`) flag: overlays view-name labels on each panel of the multi-view grid
 - Updated winit, clap, image, and other dependencies to current versions
 - Modernized GitHub Actions CI workflow with Node.js 24
 - Removed deprecated Travis CI and AppVeyor configuration
 - Added Windows x64 build artifact to CI
-```
-
-The main changes from the original are pointing the badge and download links to your fork, removing the dead AppVeyor badge, fixing the typo in "background", adding the note that it's a fork, and documenting the Windows install process correctly.
