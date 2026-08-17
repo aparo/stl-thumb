@@ -28,7 +28,11 @@ use winit::event_loop::EventLoop;
 use winit::window::WindowAttributes;
 
 const CAM_FOV_DEG: f32 = 30.0;
-const CAM_POSITION: cgmath::Point3<f32> = cgmath::Point3 { x: 2.0, y: -4.0, z: 2.0 };
+const CAM_POSITION: cgmath::Point3<f32> = cgmath::Point3 {
+    x: 2.0,
+    y: -4.0,
+    z: 2.0,
+};
 
 // Converts cgmath::perspective output (z in [-1,1]) to wgpu NDC (z in [0,1]).
 // Column-major arguments: (c0r0, c0r1, c0r2, c0r3, c1r0, ...)
@@ -43,16 +47,16 @@ const OPENGL_TO_WGPU: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 struct ModelUniforms {
-    modelview:      [[f32; 4]; 4],
-    perspective:    [[f32; 4]; 4],
-    u_light:        [f32; 3],
-    _pad0:          f32,
-    ambient_color:  [f32; 3],
-    _pad1:          f32,
-    diffuse_color:  [f32; 3],
-    _pad2:          f32,
+    modelview: [[f32; 4]; 4],
+    perspective: [[f32; 4]; 4],
+    u_light: [f32; 3],
+    _pad0: f32,
+    ambient_color: [f32; 3],
+    _pad1: f32,
+    diffuse_color: [f32; 3],
+    _pad2: f32,
     specular_color: [f32; 3],
-    _pad3:          f32,
+    _pad3: f32,
 }
 
 thread_local! {
@@ -82,7 +86,11 @@ fn create_event_loop_once() -> EventLoop<()> {
 fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: None,
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -198,16 +206,16 @@ fn build_model_uniforms_for_camera(
             1024.0,
         );
     ModelUniforms {
-        modelview:      (view_matrix * transform_matrix).into(),
-        perspective:    perspective_matrix.into(),
-        u_light:        [-1.1, 0.4, 1.0],
-        _pad0:          0.0,
-        ambient_color:  config.material.ambient,
-        _pad1:          0.0,
-        diffuse_color:  config.material.diffuse,
-        _pad2:          0.0,
+        modelview: (view_matrix * transform_matrix).into(),
+        perspective: perspective_matrix.into(),
+        u_light: [-1.1, 0.4, 1.0],
+        _pad0: 0.0,
+        ambient_color: config.material.ambient,
+        _pad1: 0.0,
+        diffuse_color: config.material.diffuse,
+        _pad2: 0.0,
         specular_color: config.material.specular,
-        _pad3:          0.0,
+        _pad3: 0.0,
     }
 }
 
@@ -388,10 +396,17 @@ fn render_tile(
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: model_bgl,
-        entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform_buf.as_entire_binding() }],
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: uniform_buf.as_entire_binding(),
+        }],
     });
 
-    let extent = wgpu::Extent3d { width: tile_w, height: tile_h, depth_or_array_layers: 1 };
+    let extent = wgpu::Extent3d {
+        width: tile_w,
+        height: tile_h,
+        depth_or_array_layers: 1,
+    };
     let output_tex = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: extent,
@@ -406,9 +421,27 @@ fn render_tile(
     let depth_tex = create_depth_texture(device, tile_w, tile_h);
     let depth_view = depth_tex.create_view(&Default::default());
 
-    fxaa.draw(device, queue, &output_view, tile_w, tile_h, fxaa_enable, |intermediate, encoder| {
-        model_render_pass(encoder, pipeline, &bind_group, vertex_buf, normal_buf, intermediate, &depth_view, background, vertex_count);
-    });
+    fxaa.draw(
+        device,
+        queue,
+        &output_view,
+        tile_w,
+        tile_h,
+        fxaa_enable,
+        |intermediate, encoder| {
+            model_render_pass(
+                encoder,
+                pipeline,
+                &bind_group,
+                vertex_buf,
+                normal_buf,
+                intermediate,
+                &depth_view,
+                background,
+                vertex_count,
+            );
+        },
+    );
 
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let unpadded_row = tile_w * 4;
@@ -421,7 +454,8 @@ fn render_tile(
         mapped_at_creation: false,
     });
 
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    let mut encoder =
+        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     encoder.copy_texture_to_buffer(
         output_tex.as_image_copy(),
         wgpu::TexelCopyBufferInfo {
@@ -437,7 +471,9 @@ fn render_tile(
     queue.submit(Some(encoder.finish()));
 
     let (tx, rx) = std::sync::mpsc::channel();
-    staging.slice(..).map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+    staging
+        .slice(..)
+        .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv()??;
 
@@ -457,18 +493,22 @@ pub fn render_to_window(config: Config) -> Result<(), Box<dyn Error>> {
     let mesh = Mesh::load(&config.model_filename, config.recalc_normals)?;
 
     let event_loop = EVENT_LOOP.with(|cell| {
-        cell.borrow_mut().take().unwrap_or_else(create_event_loop_once)
+        cell.borrow_mut()
+            .take()
+            .unwrap_or_else(create_event_loop_once)
     });
 
     let window_dim = PhysicalSize::new(config.width, config.height);
-    let window = Arc::new(event_loop.create_window(
-        WindowAttributes::default()
-            .with_title("stl-thumb")
-            .with_inner_size(window_dim)
-            .with_min_inner_size(window_dim)
-            .with_max_inner_size(window_dim)
-            .with_visible(config.visible),
-    )?);
+    let window = Arc::new(
+        event_loop.create_window(
+            WindowAttributes::default()
+                .with_title("stl-thumb")
+                .with_inner_size(window_dim)
+                .with_min_inner_size(window_dim)
+                .with_max_inner_size(window_dim)
+                .with_visible(config.visible),
+        )?,
+    );
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
@@ -560,7 +600,8 @@ pub fn render_to_window(config: Config) -> Result<(), Box<dyn Error>> {
             ..
         } => {
             let surface_tex = match surface.get_current_texture() {
-                wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                wgpu::CurrentSurfaceTexture::Success(t)
+                | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
                 _ => return,
             };
             let surface_view = surface_tex.texture.create_view(&Default::default());
@@ -631,19 +672,46 @@ pub fn render_to_image(config: &Config) -> Result<image::DynamicImage, Box<dyn E
         type Cam = (cgmath::Point3<f32>, cgmath::Vector3<f32>);
         let views: [Cam; 4] = [
             // isometric — same as default single-view camera
-            (cgmath::Point3::new(2.0, -4.0, 2.0), cgmath::Vector3::unit_z()),
+            (
+                cgmath::Point3::new(2.0, -4.0, 2.0),
+                cgmath::Vector3::unit_z(),
+            ),
             // front — looking along -Y toward origin, Z up
-            (cgmath::Point3::new(0.0, -5.0, 0.0), cgmath::Vector3::unit_z()),
+            (
+                cgmath::Point3::new(0.0, -5.0, 0.0),
+                cgmath::Vector3::unit_z(),
+            ),
             // top — looking down from +Z, Y up in image
-            (cgmath::Point3::new(0.0, 0.0, 5.0), cgmath::Vector3::new(0.0, 1.0, 0.0)),
+            (
+                cgmath::Point3::new(0.0, 0.0, 5.0),
+                cgmath::Vector3::new(0.0, 1.0, 0.0),
+            ),
             // side — looking from +X, Z up
-            (cgmath::Point3::new(5.0, 0.0, 0.0), cgmath::Vector3::unit_z()),
+            (
+                cgmath::Point3::new(5.0, 0.0, 0.0),
+                cgmath::Vector3::unit_z(),
+            ),
         ];
 
         let mut tiles: Vec<image::RgbaImage> = Vec::with_capacity(4);
         for (cam_pos, cam_up) in &views {
-            let uniforms = build_model_uniforms_for_camera(config, &mesh, *cam_pos, *cam_up, tile_w, tile_h);
-            let pixels = render_tile(&device, &queue, &model_pipeline, &model_bgl, &vertex_buf, &normal_buf, &fxaa, &uniforms, tile_w, tile_h, bg, fxaa_enable, vertex_count)?;
+            let uniforms =
+                build_model_uniforms_for_camera(config, &mesh, *cam_pos, *cam_up, tile_w, tile_h);
+            let pixels = render_tile(
+                &device,
+                &queue,
+                &model_pipeline,
+                &model_bgl,
+                &vertex_buf,
+                &normal_buf,
+                &fxaa,
+                &uniforms,
+                tile_w,
+                tile_h,
+                bg,
+                fxaa_enable,
+                vertex_count,
+            )?;
             tiles.push(image::ImageBuffer::from_raw(tile_w, tile_h, pixels).unwrap());
         }
 
@@ -667,7 +735,21 @@ pub fn render_to_image(config: &Config) -> Result<image::DynamicImage, Box<dyn E
         Ok(image::DynamicImage::ImageRgba8(grid))
     } else {
         let uniforms = build_model_uniforms(config, &mesh);
-        let pixels = render_tile(&device, &queue, &model_pipeline, &model_bgl, &vertex_buf, &normal_buf, &fxaa, &uniforms, config.width, config.height, bg, fxaa_enable, vertex_count)?;
+        let pixels = render_tile(
+            &device,
+            &queue,
+            &model_pipeline,
+            &model_bgl,
+            &vertex_buf,
+            &normal_buf,
+            &fxaa,
+            &uniforms,
+            config.width,
+            config.height,
+            bg,
+            fxaa_enable,
+            vertex_count,
+        )?;
         let img = image::ImageBuffer::from_raw(config.width, config.height, pixels).unwrap();
         Ok(image::DynamicImage::ImageRgba8(img))
     }

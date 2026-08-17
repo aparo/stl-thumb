@@ -132,6 +132,7 @@ impl Mesh {
                         "obj" => Mesh::from_obj(model_file, recalc_normals)?,
                         "stl" => Mesh::from_stl(model_file, recalc_normals)?,
                         "3mf" => Mesh::from_3mf_raw(model_file, recalc_normals)?,
+                        "step" | "stp" => Mesh::from_step(model_file, recalc_normals)?,
                         _ => unimplemented!("Format not supported"),
                     },
                 )
@@ -296,6 +297,61 @@ impl Mesh {
         }
 
         result.ok_or_else(|| "No mesh data found in 3MF file".into())
+    }
+
+    pub fn from_step<R>(mut model_file: R, _recalc_normals: bool) -> Result<Mesh, Box<dyn Error>>
+    where
+        R: Read,
+    {
+        use truck_meshalgo::tessellation::{MeshedShape, RobustMeshableShape};
+        use truck_stepio::r#in::*;
+
+        let mut content = String::new();
+        model_file.read_to_string(&mut content)?;
+
+        let exchange = ruststep::parser::parse(&content)
+            .map_err(|e| format!("STEP parse error: {e:?}"))?;
+        let table = Table::from_data_section(&exchange.data[0]);
+
+        let mut result: Option<Mesh> = None;
+
+        for (_, shell_holder) in table.shell.iter() {
+            let shell = match table.to_compressed_shell(shell_holder) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("Skipping STEP shell: {e}");
+                    continue;
+                }
+            };
+            // Two-pass tessellation: first pass derives a bounding-box diameter for
+            // relative tolerance, second pass uses that adaptive tolerance.
+            let pre = shell.robust_triangulation(0.01).to_polygon();
+            let tol = (pre.bounding_box().diameter() * 0.001_f64).max(1e-6);
+            let polygon = shell.robust_triangulation(tol).to_polygon();
+
+            let pos = polygon.positions();
+            for face in polygon.tri_faces() {
+                let v: [stl_io::Vertex; 3] = std::array::from_fn(|i| {
+                    let p = pos[face[i].pos];
+                    stl_io::Vertex::new([p.x as f32, p.y as f32, p.z as f32])
+                });
+                let tri = stl_io::Triangle {
+                    normal: stl_io::Normal::new([0.0, 0.0, 0.0]),
+                    vertices: v,
+                };
+                result
+                    .get_or_insert_with(|| Mesh {
+                        vertices: Vec::new(),
+                        normals: Vec::new(),
+                        indices: Vec::new(),
+                        bounds: BoundingBox::new(&v[0]),
+                        model_had_normals: false,
+                    })
+                    .process_tri(&tri, true);
+            }
+        }
+
+        result.ok_or_else(|| "No geometry found in STEP file".into())
     }
 
     pub fn from_stl<R>(mut model_file: R, recalc_normals: bool) -> Result<Mesh, Box<dyn Error>>

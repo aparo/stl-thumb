@@ -31,6 +31,9 @@ wgpu = "30.0.0"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 font8x8 = { version = "0.3", features = ["unicode"] }
 pollster = "1.0.1"
+truck-stepio = { version = "0.3", features = ["in"] }
+truck-meshalgo = "0.4"
+truck-polymesh = "0.6"
 libc = "0.2.189"
 log = "0.4.33"
 mint = "0.5.9"

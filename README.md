@@ -4,7 +4,7 @@
 [![Documentation](https://img.shields.io/docsrs/stl-thumb/latest)](https://docs.rs/stl-thumb/latest/stl_thumb/)
 [![Crates.io](https://img.shields.io/crates/v/stl-thumb.svg)](https://crates.io/crates/stl-thumb)
 
-Stl-thumb is a fast lightweight thumbnail generator for 3D model (STL, OBJ, 3MF) files. It can show previews for model files in your file manager on Linux and Windows. It is written in Rust and uses [wgpu](https://wgpu.rs/) for cross-platform GPU rendering.
+Stl-thumb is a fast lightweight thumbnail generator for 3D model (STL, OBJ, 3MF, STEP) files. It can show previews for model files in your file manager on Linux and Windows. It is written in Rust and uses [wgpu](https://wgpu.rs/) for cross-platform GPU rendering.
 
 ![Screenshot](https://user-images.githubusercontent.com/3131268/116009182-f3f89c80-a5cc-11eb-817d-91e8a9fad279.png)
 
@@ -93,7 +93,7 @@ $ stl-thumb <MODEL_FILE> [IMG_FILE] [OPTIONS]
 
 | Option | Description |
 | --- | --- |
-| \<MODEL_FILE\> | The model file you want a picture of. Use `-` to read from stdin instead of a file. |
+| \<MODEL_FILE\> | The model file you want a picture of. Supported formats: STL, OBJ, 3MF, STEP/STP. Use `-` to read from stdin instead of a file. |
 | \<IMG_FILE\> | The thumbnail image file that will be created. Use `-` to write to stdout instead of a file. Optional when `--info` is the only goal. |
 | -s, --size \<size\> | Specify the width of the image in pixels. The image is always square. |
 | -f, --format \<format\> | The format of the image file. If not specified it will be determined from the file extension, or default to PNG if there is no extension. Supported formats: PNG, JPEG, GIF, ICO, BMP |
@@ -162,6 +162,7 @@ A 2-pixel separator line is always drawn between panels. Adding `-l` overlays th
 ## Changes from upstream
 
 - Migrated GPU backend from glium/OpenGL to [wgpu](https://wgpu.rs/) 30.0 with WGSL shaders
+- Added STEP/STP file format support via B-rep tessellation (truck ecosystem)
 - Added `--multi-view` (`-w`) flag: renders a 2×2 grid of isometric, front, top, and side views
 - Added `--label` (`-l`) flag: overlays view-name labels on each panel of the multi-view grid
 - Added `--info` (`-i`) flag: prints model KPIs (triangle count, dimensions, surface area, volume, watertight check) without requiring GPU rendering
